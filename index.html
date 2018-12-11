@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>web-platform-tests on Chrome DevTools Protocol</title>
+
+    <style>
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+
+      /* Remark style over rides */
+      .remark-slide-scaler {
+        box-shadow: none;
+      }
+      .remark-container {
+        background: none;
+      }
+
+      /* Custom content */
+      .remark-slide-content img {
+        max-width: 100%;
+      }
+
+      .remark-slide-content .license {
+        position: absolute;
+        bottom: 0;
+
+        font-size: 0.6em;
+      }
+      .remark-slide-content .license img {
+        margin: 0;
+        display: inline;
+        vertical-align: middle;
+      }
+
+      .side-by-side pre {
+        width: 50%;
+
+        float: left;
+      }
+
+      .softer {
+        opacity: 0.6;
+      }
+
+      .image-attribution {
+        position: absolute;
+        bottom: 0;
+
+        font-size: 0.6em;
+      }
+
+      .webdriver-spec {
+        font-size: 0.5em;
+      }
+
+      .remark-slide-content blockquote {
+        background-color: #eee;
+        padding: 1em;
+      }
+      .remark-slide-content blockquote h3 {
+        font-size: 1.3em;
+      }
+
+      .remark-slide-content table {
+        margin: 0 auto;
+      }
+
+      .remark-slide-content th, .remark-slide-content td {
+        padding-right: 1em;
+        text-align: left;
+      }
+    </style>
+  </head>
+  <body>
+    <textarea id='source'>
+class: middle, center
+
+# WPT on CDP
+
+Researching the use of [the Chrome DevTools
+protocol](https://chromedevtools.github.io/devtools-protocol/) to run [the
+web-platform-tests](https://github.com/web-platform-tests/wpt) in Google
+Chrome.
+
+2018-12-11
+
+.softer[
+
+(press the <kbd>p</kbd> key to view presenter's notes)
+
+]
+
+.license[
+
+<a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" src="./cc-by-sa.png" /></a>
+This presentation is licensed under a
+<a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>.
+
+]
+
+---
+class: middle
+
+Automating Chrome in web-platform-tests today:
+
+    wptrunner <-- WebDriver --> Chromedriver <-------- CDP ---------> Chrome
+
+The goal of this experiment:
+
+    wptrunner <--------------------- CDP ---------------------------> Chrome
+
+---
+class: middle
+
+- **Challenges**
+- Implementation overview
+- Results
+- Future work
+
+---
+
+## Finding a library
+
+Chrome Debugger Protocol bindings:
+
+- [chromewhip](https://github.com/chuckus/chromewhip)
+- [PyChromeDevTools](https://github.com/marty90/PyChromeDevTools)
+- [pychrome](https://github.com/fate0/pychrome)
+
+WPT's constraints:
+
+- Operating systems: GNU/Linux, macOS, and Windows
+- Platform: Python 2
+- License: [BSD
+  3-clause](https://github.com/web-platform-tests/wpt/blob/5acd3bcf6609691afc493aed8cb4446e8dc796ee/LICENSE.md)
+  compatible
+- functional integration with the WebSocket protocol supported by
+  Chromium/Chrome (e.g. version and protocol extensions)
+
+???
+
+As of October 2018 (when research and development began), none of the libraries
+satisfied the constraints.
+
+---
+
+## Finding a library
+
+Generic WebSocket clients implementations:
+
+- [Lomond](https://pypi.org/project/lomond/)
+- [pywebsocket](https://github.com/google/pywebsocket) - "pywebsocket is
+  intended for testing or experimental purposes."
+- [wspy](https://github.com/taddeus/wspy) - client too primitive to interface
+  with Chrome
+- [WebSock](https://pypi.org/project/websock/) - does not expose a client
+  abstraction
+- [gevent-websocket](https://pypi.org/project/gevent-websocket/) - Last
+  released: Mar 12, 2017
+- [ws4py](https://github.com/Lawouach/WebSocket-for-Python) - unmaintained
+- [Autobahn](https://crossbar.io/autobahn/#python) &
+  [Twisted](http://twistedmatrix.com/) (Autobahn also integrates with
+  [asyncio](http://docs.python.org/3.4/library/asyncio.html))
+- [websockets](https://pypi.org/project/websockets/) - requires Python 3
+- [websocket-client](https://pypi.org/project/websocket-client/) - LGPL licensed
+- [Tornado](http://www.tornadoweb.org/)
+
+???
+
+In the Python ecosystem, WebSocket *server* implementations abound. Clients are
+harder to come by.
+
+---
+
+## Finding a library
+
+Generic WebSocket clients implementations satisfying WPT's constraints:
+
+- [Lomond](https://pypi.org/project/lomond/)
+- [gevent-websocket](https://pypi.org/project/gevent-websocket/)
+- [ws4py](https://github.com/Lawouach/WebSocket-for-Python)
+- [Autobahn](https://crossbar.io/autobahn/#python) &
+  [Twisted](http://twistedmatrix.com/)
+
+Subjective priorities:
+
+- probability of support/maintenance
+- number and size of dependencies
+
+Initial experimentation: https://github.com/bocoup/wpt-cdp-experiment
+
+Winner: [Lomond](https://pypi.org/project/lomond/)
+
+---
+
+## Finding a library
+
+> Polling
+>
+> Lomond checks for automatic pings and performs other housekeeping tasks at a
+> regular intervals. This *polling* is exposed as `Poll` events. Your
+> application can use these events to do any processing that needs to be
+> invoked at regular intervals.
+>
+> The default poll rate of 5 seconds is granular enough for Lomond’s polling
+> needs, while having negligible impact on CPU. If your application needs to
+> process at a faster rate, you may set the `poll` parameter of `connect()`.
+>
+> **Note** If your application needs to be more realtime than polling once a
+> second, you should probably use threads in tandem with the event loop.
+
+https://lomond.readthedocs.io/en/latest/guide.html#polling
+
+???
+
+Lomond uses a polling-based approach by design, making it less efficient than a
+typical WebSocket client.
+
+---
+
+## Finding a library
+
+Runner-up: [wspy](https://github.com/taddeus/wspy)
+
+> wspy is a standalone implementation of web sockets for Python, defined by RFC 6455.
+> The incentive for creating this library is the absence of a layered
+> implementation of web sockets outside the scope of web servers such as Apache
+> or Nginx. wspy does not require any third-party programs or libraries outside
+> Python's standard library. It provides low-level access to sockets, as well
+> as high-level functionalities to easily set up a web server. Thus, it is both
+> suited for quick server programming, as well as for more demanding
+> applications that require low-level control over each frame being
+> sent/received.
+
+https://github.com/taddeus/wspy
+
+???
+
+The `wspy` library was disqualified because it doesn't support [the per-message
+deflate WebSocket extension](https://tools.ietf.org/html/rfc7692).
+
+---
+
+## API stability
+
+Ideal:
+
+    wptrunner <-- WebDriver --> Chromedriver <-------- CDP ---------> Chrome
+
+    wptrunner <--------------------- CDP ---------------------------> Chrome
+
+???
+
+The goal of this project was to remove Chromedriver and use CDP in its place.
+From that perspective, it was encouraging to know that Chromedriver is itself
+implemented in CDP. That made the task seem much more like eliminating a
+middleman.
+
+--
+
+ Actual target:
+
+                                               .--- stable CDP ---.
+    wptrunner <-- WebDriver --> Chromedriver <-+ experimental CDP +-> Chrome
+                                               '- deprecated CDP -'
+
+    wptrunner <----------------- stable CDP ------------------------> Chrome
+
+???
+
+The reality is a little more nuanced, though. When it comes to coordinating
+with changes to the Chrome DevTools Protocol, the Chromedriver maintainers have
+an advantage on WPT. This affords them more confidence in their use of APIs
+that are labeled "experimental" or "deprecated" for public consumption.
+
+I tried to rely on the stable API alone, but I wasn't always successful. I'll
+say more about that shortly.
+
+---
+
+## Semantics
+
+WebDriver: Navigate To
+
+<blockquote class="webdriver-spec">
+
+<ol>
+ <li><p>If the <a href="">current top-level browsing context</a> is <a href="">no longer open</a>,
+  return <a href="">error</a> with <a href="">error code</a> <a href="">no such window</a>.
+
+ <li><p>Let <var>url</var> be the result of
+  <a href="">getting the property</a> <code>url</code>
+  from the <var>parameters</var> argument.
+
+ <li><p>If <var>url</var> is not an <a href="">absolute URL</a>
+  or is not an <a href="">absolute URL with fragment</a> or not a
+  <a href="">local scheme</a>,
+  return <a href="">error</a> with <a href="">error code</a> <a href="">invalid argument</a>.
+
+ <li><p><a href="">Handle any user prompts</a> and return its value if it is an <a href="">error</a>.
+
+ <li><p>Let <var>current URL</var> be the <a href="">current top-level browsing context</a>’s
+ <a href="">active document</a>’s <a href="">document URL</a>.
+
+ <li><p>If <var>current URL</var> and <var>url</var> do not have the same
+   <a href="">absolute URL</a>:
+
+   <ol>
+     <li>If <var>timer</var> has not been started, start
+       a <var>timer</var>. If this algorithm has not completed
+       before <var>timer</var> reaches the <a href="">session</a>'s <a href="">session page
+       load timeout</a> in milliseconds, return an <a href="">error</a>
+       with <a href="">error code</a> <a href="">timeout</a>.
+   </ol>
+
+ <li><p><a href="">Navigate</a> the <a href="">current top-level browsing context</a> to <var>url</var>.
+
+ <li><p>If <var>url</var> <a href="">is special</a> except for <code>file</code> and
+   <var>current URL</var> and <var>URL</var> do not have the same <a href="">absolute URL</a> :
+ <ol>
+  <li><p><a href="#">Try</a> to <a href="#">wait for navigation to complete</a>.
+
+  <li><p><a href="#">Try</a> to run the <a href="#">post-navigation checks</a>.
+ </ol>
+
+ <li><p>Set the <a href="#">current browsing context</a>
+  to the <a href="#">current top-level browsing context</a>.
+
+ <li><p>If the <a href="#">current top-level browsing context</a> contains
+  a <a href="#">refresh state pragma directive</a> of <var>time</var> 1 second
+  or less, wait until the refresh timeout has elapsed, a
+  new <a href="#">navigate</a> has begun, and return to the first step of this
+  algorithm.
+
+ <li><p>Return <a href="#">success</a> with data <a href="#">null</a>.
+</ol>
+
+</blockquote>
+
+[source](https://w3c.github.io/webdriver/#navigate-to) (retrieved 2018-12-10)
+
+---
+
+## Semantics
+
+Chrome DevTools Protocol: `Page.`**`navigate`**
+
+> Navigates current page to the given URL.
+
+[source](https://chromedevtools.github.io/devtools-protocol/tot/Page#method-navigate) (retrieved 2018-12-10)
+
+???
+
+From the description, you might expect that after sending this command and
+receiving a response, the navigation operation would be complete. That's what I
+expected, anyway.
+
+That's actually not the case, which is why the comparison isn't completely
+fair. CDP allows for inspection into many parts of navigation. In fact, it
+*requires* it.
+
+---
+
+```diff
+diff --git a/tools/wptrunner/wptrunner/executors/reftest-wait_webdriver.js b/tools/wptrunner/wptrunner/executors/reftest-wait_webdriver.js
+index c1cc649..f0ba2bc 100644
+--- a/tools/wptrunner/wptrunner/executors/reftest-wait_webdriver.js
++++ b/tools/wptrunner/wptrunner/executors/reftest-wait_webdriver.js
+@@ -1,6 +1,11 @@
+ var callback = arguments[arguments.length - 1];
+ 
+ function root_wait() {
++  if (document.readyState != "complete") {
++    setTimeout(root_wait, 10);
++    return;
++  }
++
+   if (!root.classList.contains("reftest-wait")) {
+     observer.disconnect();
+ 
+@@ -37,8 +42,4 @@ var observer = new MutationObserver(root_wait);
+ 
+ observer.observe(root, {attributes: true});
+ 
+-if (document.readyState != "complete") {
+-    onload = root_wait;
+-} else {
+-    root_wait();
+-}
++root_wait();
+```
+
+???
+
+This is a change to a script which wptrunner injects into the document. Today,
+it does that using WebDriver, and everything works as expected.
+
+In my initial implementation, navigation was occurring far earlier than I
+expected. This change allows the script to be injected prior to the window's
+`load` event. (It appears to support this already, but the mechanism it uses
+invalidates all tests which set a handler via the document's `<body>` element.)
+
+---
+
+```diff
+-var root = document.documentElement;
+-var observer = new MutationObserver(root_wait);
+-
+-observer.observe(root, {attributes: true});
+-
+-root_wait();
++var root, observer;
++
++(function begin() {
++  root = document.documentElement;
++
++  // This script may be evaluated before the document element is available.
++  if (!root) {
++    setTimeout(begin, 0);
++    return;
++  }
++  observer = new MutationObserver(root_wait);
++
++  observer.observe(root, {attributes: true});
++
++  root_wait();
++}());
+```
+
+???
+
+Shortly after, I found that the script was executing even sooner than *that*.
+Tests were failing intermittently because the `document.documentElement` was
+not defined.
+
+I actually applied this patch and ran the tests before thinking that maybe I
+was doing something wrong.
+
+---
+
+## Semantics
+
+Chrome DevTools Protocol: Navigation-related events
+
+`Page.`**`domContentEventFired`**
+
+`Page.`**`frameScheduledNavigation`** - Fired when frame schedules a potential
+navigation.
+
+`Page.`**`frameStartedLoading`** - Fired when frame has started loading.
+
+`Page.`**`frameStoppedLoading`** - Fired when frame has stopped loading.
+
+`Page.`**`lifecycleEvent`** - Fired for top level page lifecycle events such as
+navigation, load, paint, etc.
+
+`Page.`**`loadEventFired`**
+
+`Page.`**`navigatedWithinDocument`** - Fired when same-document navigation
+happens, e.g. due to history API usage or anchor navigation.
+
+???
+
+Chrome DevTools Protocol also defines a bunch of "events," many of which are
+relevant to navigation.
+
+To correctly implement the common case of "go to this URL and let me know if
+anything goes wrong," one must identify the "active frame," register for many
+events fired from that frame, initiate navigation, and wait for an event for
+some duration before giving up and reporting the operation as "timed out." This
+was what I attempted to implement for this experiment, but I almost certainly
+got it wrong.
+
+In WebDriver, all of this is modeled with a single HTTP request.
+
+Chrome DevTools is certainly more powerful, but this comes at the cost of
+complexity. Although it might be possible to improve test precision with some
+of this functionality, I'd be leery of relying on the timing of messages on a
+WebSocket channel.
+
+For WPT, I would recommend using a library.
+
+This is also a very indirect way to document a protocol. Even with the explicit
+naming of these events, the precise semantics probably aren't clear enough to
+support interoperability.
+
+---
+class: middle
+
+- Challenges
+- **Implementation**
+- Results
+- Future work
+
+---
+
+## Architecture overview
+
+- browser - web browser process which runs a WebSocket server that implements
+  the Chrome Debugger Protocol; this process is managed by the user of
+  Pyppeteer
+- `pyppeteer.Connection` - abstraction around a WebSocket connection to a
+  running browser process
+- `pyppeteer.Session` - interface for interacting with a browser window
+
+```
+                    .---------------- Pyppeteer ---------------.
+    .---------.     |     .------------.           .---------. |
+    | browser | 1 <---> * | Connection | * <---> 1 | Session | |
+    '---------'     |     '------------'           '---------' |
+                    '------------------------------------------'
+```
+
+---
+
+## API usage
+
+    $ grep -Ehro 'API status:.*' tools/pyppeteer/pyppeteer | sort | uniq -c
+          3 API status: deprecated
+          5 API status: experimental
+         28 API status: stable
+
+???
+
+Each CDP method and event reference in the source code is labeled with a note
+on the API status at the time of writing. As mentioned earlier, I was mostly
+able to stick to the stable API. One piece of functionality could be
+implemented with either a deprecated API or an experimental API, so I used both
+and exposed runtime a flag to control which is used.
+
+---
+class: middle
+
+- Challenges
+- Implementation
+- **Results**
+- Future work
+
+---
+
+## Settings
+
+All trials:
+
+- Used [WPT at commit
+  `8eab58f51c93f0075f4cc5e8e6d5b4fb2c4c4919`](8eab58f51c93f0075f4cc5e8e6d5b4fb2c4c4919)
+  - Date: 2018-12-10
+  - Total tests: 31101
+- Used the `wpt-docker-worker` (only available from tasks initiated from the
+  web-platform-tests/wpt repository)
+- Did not restart after unexpected test results
+
+---
+
+`master` to CDP:
+
+- 361 tests with differing statuses
+- 35 tests with differing subtest results
+
+    (361 + 35) / 31101 => 1.27% discrepancy in patch
+
+???
+
+Surprisingly, the results of the CDP-powered versoin of wptrunner did not
+completely align with those in `master`.
+
+--
+
+`master` to itself:
+
+- 21 tests with differing statuses
+- 9 tests with differing subtest results
+
+    (21 + 9) / 31101 => 0.10% discrepancy due to flakiness
+
+???
+
+A small portion of those can be explained by existing flakiness in the tests.
+If anyone's bored, I've included a list of the flaky tests in the appendix.
+
+--
+
+`revert-gh-13419` ([gh-13419](https://github.com/web-platform-tests/wpt/pull/13419)) to CDP:
+
+- 64 tests with differing statuses
+- 32 tests with differing subtest results
+
+    (64 + 32) / 31101 => 0.31% discrepancy in patch (adjusted)
+
+???
+
+An infrastructure patch merged in October introduced a number of regressions.
+Many of the discrepancies identified above are unintentional fixes to those
+regressions. If we compare the results to a version of `master` where that
+patch is reverted, we get a clearer picture of undesirable differences.
+
+Further research is needed to determine the source of these discrepancies. I
+suspect it's due to other oversimplifications in my use of the protocol.
+
+---
+class: middle
+
+- Challenges
+- Implementation
+- Results
+- **Future work**
+
+---
+
+## Future work
+
+Contribute support for [the per-message deflate WebSocket
+extension](https://tools.ietf.org/html/rfc7692) to `wspy`; switch to `wspy`
+
+- More efficient use of transport -- potentially faster and more stable
+- Small time/effort investment (presumably)
+
+---
+
+![issue report for the wspy project](img/wspy-issue.png)
+
+???
+
+This would involve contributing a feature to `wspy`. That would have the added
+benefit of helping [@jiagangzhang](https://github.com/jiagangzhang).
+
+---
+
+## Future work
+
+Migrate wptrunner to Python 3 and build on top of a more ergonomic library.
+
+???
+
+Python 3 compatibility has been discussed before because it would be beneficial
+for a number of other reasons.
+
+---
+
+![A list of pull requests concerning Python 3 support](img/python-3-pull-requests.png)
+
+???
+
+This effort is already underway as a pet project by long-time WPT contributor
+[@Ms2ger](https://github.com/ms2ger)
+
+---
+
+## Future work
+
+Work with Chrome DevTools maintainers to nail down the semantics of the most
+stable methods.
+
+---
+
+## Appendix: Flaky tests identified during this research
+
+    /client-hints/accept_ch_lifetime_same_origin_iframe.tentative.https.html
+    /content-security-policy/inheritance/blob-url-in-child-frame-self-navigate-inherits.sub.html
+    /cookie-store/cookieStore_delete_arguments.tentative.https.window.html
+    /cookie-store/cookieStore_delete_basic.tentative.https.window.html
+    /cookie-store/cookieStore_event_basic.tentative.https.window.html
+    /cookie-store/cookieStore_get_arguments.tentative.https.window.html
+    /cookie-store/cookieStore_get_set_basic.tentative.https.window.html
+    /cookies/samesite/form-get-blank-reload.html
+    /cookies/samesite/form-post-blank-reload.html
+    /fetch/api/request/destination/fetch-destination-worker.https.html
+    /html/webappapis/scripting/events/compile-event-handler-settings-objects.html
+    /paint-timing/first-image-child.html
+    /service-workers/cache-storage/common.https.html
+    /service-workers/cache-storage/window/sandboxed-iframes.https.html
+    /service-workers/service-worker/controller-with-no-fetch-event-handler.https.html
+    /service-workers/service-worker/fetch-event-redirect.https.html
+    /service-workers/service-worker/navigate-window.https.html
+    /storage/storagemanager-persist.https.window.html
+    /storage/storagemanager-persisted.https.any.html
+    /webvtt/rendering/cues-with-video/processing-model/audio_has_no_subtitles.html
+    /xhr/send-after-setting-document-domain.htm
+
+</textarea>
+
+    <script src='./remark.js'>
+    </script>
+    <script>
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
