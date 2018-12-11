@@ -500,6 +500,8 @@ class: middle
 
 ## Architecture overview
 
+Concepts
+
 - browser - web browser process which runs a WebSocket server that implements
   the Chrome Debugger Protocol; this process is managed by the user of
   Pyppeteer
@@ -514,6 +516,12 @@ class: middle
     '---------'     |     '------------'           '---------' |
                     '------------------------------------------'
 ```
+
+Code hosted on GitHub.com: https://github.com/bocoup/wpt/tree/wptrunner-cdp
+
+Change set:
+
+    15 files changed, 1042 insertions(+), 103 deletions(-)
 
 ---
 
@@ -549,12 +557,14 @@ All trials:
 - Used [WPT at commit
   `8eab58f51c93f0075f4cc5e8e6d5b4fb2c4c4919`](8eab58f51c93f0075f4cc5e8e6d5b4fb2c4c4919)
   - Date: 2018-12-10
-  - Total tests: 31101
+  - Total tests: 31,101
 - Used the `wpt-docker-worker` (only available from tasks initiated from the
   web-platform-tests/wpt repository)
 - Did not restart after unexpected test results
 
 ---
+
+## Discrepancies
 
 `master` to CDP:
 
@@ -600,6 +610,43 @@ patch is reverted, we get a clearer picture of undesirable differences.
 
 Further research is needed to determine the source of these discrepancies. I
 suspect it's due to other oversimplifications in my use of the protocol.
+
+---
+
+## Duration
+
+`master`:
+
+- Testharness: 17.88 minutes (&sigma; = 8.11)
+- Reftest: 12.16 minutes (&sigma; = 5.29)
+
+`revert-gh-13419` ([gh-13419](https://github.com/web-platform-tests/wpt/pull/13419)):
+
+- Testharness: 12.07 minutes (&sigma; = 4.33)
+- Reftest: 11.63 minutes (&sigma; = 4.90)
+
+CDP:
+
+- Testharness: 12.65 minutes (&sigma; = 4.58)
+- Reftest: 7.81 minutes (&sigma; = 3.47)
+
+???
+
+These are the average durations needed to run a "chunk" of each test type.
+
+The current implementation appears to be faster at running reftests, but
+remember it is built on a WebSocket library that uses a polling strategy. These
+numebrs may change with the use of another WebSocket library.
+
+---
+
+## Test improvements
+
+[gh-14109: [paint-timing] Fix test for non-automated contexts ](https://github.com/web-platform-tests/wpt/pull/14109)
+
+[gh-14110: [paint-timing] Avoid race condition](https://github.com/web-platform-tests/wpt/pull/14110)
+
+[gh-14132: [FileAPI] Remove reference to non-existent file](https://github.com/web-platform-tests/wpt/pull/14132)
 
 ---
 class: middle
@@ -654,6 +701,20 @@ This effort is already underway as a pet project by long-time WPT contributor
 
 Work with Chrome DevTools maintainers to nail down the semantics of the most
 stable methods.
+
+---
+
+## Summary
+
+Experiment a success!
+
+- Proved concept
+- Suggested potential improvement in efficiency (decreased time-to-results)
+- Rough edges with tractable path to resolution (~100 tests invalidated)
+- Identified risk for production use: complexity and stability (could be
+  mitigated through the use of a CDP-aware library)
+
+https://github.com/bocoup/wpt/tree/wptrunner-cdp
 
 ---
 
